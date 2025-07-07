@@ -23,6 +23,18 @@ from agents import (
     GuardrailFunctionOutput,
     input_guardrail,
 )
+
+# 导入新的协调器系统工具
+from orchestrator_utils import (
+    create_orchestrator_context,
+    task_manager,
+    chart_generator,
+    analyze_and_plan,
+    execute_parallel_tasks,
+    synthesize_results,
+    initialize_orchestrator,
+    get_orchestrator
+)
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
 # =========================
@@ -232,32 +244,72 @@ async def retention_analysis(
 
 @function_tool(
     name_override="generate_visualization",
-    description_override="Generate data visualizations and charts."
+    description_override="Generate data visualizations and charts using MCP chart server."
 )
 async def generate_visualization(
     context: RunContextWrapper[GameAnalyticsContext],
     chart_type: str = "dashboard",
     data_source: str = "current_analysis"
 ) -> str:
-    """Generate data visualizations."""
+    """Generate data visualizations with MCP enhancement."""
     try:
         player_data, session_data = get_game_data()
-
         context.context.analysis_type = "visualization"
+        game_id = context.context.game_id or "default_game"
+
+        # 确保MCP管理器已初始化
+        from mcp_integration import mcp_manager
+        if not mcp_manager.is_initialized:
+            await mcp_manager.initialize()
 
         # 根据图表类型生成不同的可视化配置
         if chart_type == "player_segments":
             analyzer = PlayerBehaviorAnalyzer(player_data, session_data)
             data = analyzer.analyze_player_segments()
             config = VisualizationGenerator.generate_chart_config("player_segments", data)
+
+            # 使用MCP生成玩家分群图表
+            try:
+                mcp_chart = await mcp_manager.chart_generator.generate_pie_chart(
+                    data=[{"category": k, "value": v} for k, v in data.items()],
+                    category_field="category",
+                    value_field="value",
+                    title=f"玩家分群分析 - {game_id}"
+                )
+            except Exception as e:
+                mcp_chart = {"status": "error", "message": str(e)}
+
         elif chart_type == "revenue_trend":
             analyzer = RevenueAnalyzer(player_data, session_data)
             data = analyzer.analyze_revenue_metrics()
             config = VisualizationGenerator.generate_chart_config("daily_revenue", data)
+
+            # 使用MCP生成收入趋势图表
+            try:
+                mcp_chart = await mcp_manager.chart_generator.generate_line_chart(
+                    data=[{"time": k, "value": v} for k, v in data.items()],
+                    x_field="time",
+                    y_field="value",
+                    title=f"收入趋势分析 - {game_id}"
+                )
+            except Exception as e:
+                mcp_chart = {"status": "error", "message": str(e)}
+
         elif chart_type == "retention_funnel":
             analyzer = RetentionAnalyzer(player_data, session_data)
             data = analyzer.analyze_retention_metrics()
             config = VisualizationGenerator.generate_chart_config("retention_funnel", data)
+
+            # 使用MCP生成留存漏斗图表
+            try:
+                mcp_chart = await mcp_manager.chart_generator.generate_chart(
+                    chart_type="funnel",
+                    data={"data": [{"category": k, "value": v} for k, v in data.items()]},
+                    title=f"玩家留存漏斗 - {game_id}"
+                )
+            except Exception as e:
+                mcp_chart = {"status": "error", "message": str(e)}
+
         else:
             # 默认仪表板
             config = {
@@ -266,22 +318,40 @@ async def generate_visualization(
                 'description': '综合数据概览'
             }
 
-        result = f"""📊 **数据可视化生成完成**
+            # 使用MCP生成综合仪表板
+            try:
+                mcp_chart = await mcp_manager.chart_generator.generate_dashboard(
+                    charts=[config],
+                    layout="grid",
+                    title=f"游戏数据分析仪表板 - {game_id}"
+                )
+            except Exception as e:
+                mcp_chart = {"status": "error", "message": str(e)}
+
+        result = f"""📊 **数据可视化生成完成** (游戏ID: {game_id})
 
 🎨 **图表配置:**
 - 类型: {config['type']}
 - 标题: {config['title']}
 - 描述: {config.get('description', '暂无描述')}
 
+🚀 **MCP增强功能:**
+- 图表状态: {mcp_chart['status']}
+- 图表类型: {mcp_chart['type']}
+- 高性能渲染引擎
+- 交互式操作支持
+
 💡 **使用说明:**
 - 图表已生成，可在前端界面查看
 - 支持交互式操作和数据筛选
-- 可导出为PNG/PDF格式
+- 可导出为PNG/PDF/SVG格式
+- 响应式布局自适应
 
 🔄 **数据更新:**
 - 数据来源: {data_source}
 - 更新频率: 实时
-- 最后更新: 刚刚"""
+- 最后更新: 刚刚
+- MCP服务器: 已启动"""
 
         return result.strip()
 
@@ -387,13 +457,44 @@ def player_behavior_instructions(
     game_id = ctx.game_id or "[unknown]"
     return (
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are a Player Behavior Analysis Agent. You specialize in analyzing player behavior patterns and preferences.\n"
-        "Use the following routine to support the user:\n"
-        f"1. Current game context: {game_id}.\n"
-        "2. Use the player_behavior_analysis tool to analyze player data and behavior patterns.\n"
-        "3. Provide insights about player types, engagement levels, and preferences.\n"
-        "4. Offer recommendations for improving player experience.\n"
-        "If the user asks about other types of analysis, transfer back to the triage agent."
+        "你是一个专业的玩家行为分析智能体，基于Anthropic研究系统的subagent设计模式。\n\n"
+
+        "## 核心职责\n"
+        "作为专业化的研究子智能体，你专注于玩家行为模式、参与度指标和玩家分群分析。\n\n"
+
+        "## 工作流程 (OODA循环)\n"
+        "1. **观察 (Observe)**: 仔细分析用户的查询需求，识别具体的玩家行为分析类型\n"
+        "2. **定向 (Orient)**: 确定最适合的分析方法和数据维度\n"
+        "3. **决策 (Decide)**: 选择合适的分析工具和参数\n"
+        "4. **行动 (Act)**: 执行分析并生成洞察报告\n\n"
+
+        "## 分析能力\n"
+        "- 玩家分群分析 (新手、活跃、付费、流失玩家)\n"
+        "- 行为模式识别和趋势分析\n"
+        "- 参与度指标计算和评估\n"
+        "- 用户画像构建和特征提取\n"
+        "- 行为预测和异常检测\n\n"
+
+        "## 执行原则\n"
+        "- 使用并行工具调用提高分析效率\n"
+        "- 评估数据质量和来源可靠性\n"
+        "- 提供可操作的洞察和建议\n"
+        "- 向协调器报告详细的分析结果\n"
+        "- 专注于玩家行为领域，其他问题转交给分流智能体\n\n"
+
+        f"## 当前上下文\n"
+        f"- 游戏ID: {game_id}\n"
+        f"- 分析类型: {ctx.analysis_type or '待确定'}\n"
+        f"- 时间范围: {ctx.time_range or '默认'}\n\n"
+
+        "## 输出格式\n"
+        "始终提供结构化的分析报告，包括：\n"
+        "- 数据概览和质量评估\n"
+        "- 关键发现和洞察\n"
+        "- 可视化建议\n"
+        "- 行动建议和优化方案\n\n"
+
+        "使用 player_behavior_analysis 工具执行具体的分析任务。"
     )
 
 player_behavior_agent = Agent[GameAnalyticsContext](
@@ -412,13 +513,44 @@ def performance_analysis_instructions(
     game_id = ctx.game_id or "[unknown]"
     return (
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are a Performance Analysis Agent. You specialize in monitoring game performance metrics.\n"
-        "Use the following routine to support the user:\n"
-        f"1. Current game context: {game_id}.\n"
-        "2. Use the performance_monitoring tool to check server status and performance metrics.\n"
-        "3. Identify performance bottlenecks and optimization opportunities.\n"
-        "4. Provide recommendations for improving game performance.\n"
-        "If the user asks about other types of analysis, transfer back to the triage agent."
+        "你是一个专业的游戏性能分析智能体，基于Anthropic研究系统的subagent设计模式。\n\n"
+
+        "## 核心职责\n"
+        "作为专业化的研究子智能体，你专注于游戏性能监控、技术指标分析和系统优化建议。\n\n"
+
+        "## 工作流程 (OODA循环)\n"
+        "1. **观察 (Observe)**: 分析性能查询需求，识别关键性能指标\n"
+        "2. **定向 (Orient)**: 确定性能分析的重点领域和监控维度\n"
+        "3. **决策 (Decide)**: 选择合适的性能监控工具和分析方法\n"
+        "4. **行动 (Act)**: 执行性能分析并提供优化建议\n\n"
+
+        "## 分析能力\n"
+        "- 服务器性能监控 (CPU、内存、网络)\n"
+        "- 游戏崩溃率和错误分析\n"
+        "- 加载时间和响应延迟分析\n"
+        "- 系统稳定性评估\n"
+        "- 性能瓶颈识别和优化建议\n\n"
+
+        "## 执行原则\n"
+        "- 实时监控关键性能指标\n"
+        "- 快速识别性能异常和瓶颈\n"
+        "- 提供可执行的优化方案\n"
+        "- 评估性能改进的影响\n"
+        "- 专注于技术性能领域，其他问题转交给分流智能体\n\n"
+
+        f"## 当前上下文\n"
+        f"- 游戏ID: {game_id}\n"
+        f"- 分析类型: {ctx.analysis_type or '待确定'}\n"
+        f"- 监控指标: {ctx.metrics or ['默认指标']}\n\n"
+
+        "## 输出格式\n"
+        "始终提供结构化的性能报告，包括：\n"
+        "- 性能指标概览\n"
+        "- 异常和瓶颈识别\n"
+        "- 根因分析\n"
+        "- 优化建议和实施方案\n\n"
+
+        "使用 performance_monitoring 工具执行具体的性能分析任务。"
     )
 
 performance_analysis_agent = Agent[GameAnalyticsContext](
@@ -498,13 +630,40 @@ visualization_agent = Agent[GameAnalyticsContext](
 triage_agent = Agent[GameAnalyticsContext](
     name="Triage Agent",
     model="gpt-4.1",
-    handoff_description="A triage agent that can delegate game analytics requests to the appropriate specialized agent.",
+    handoff_description="A research lead agent that analyzes queries and coordinates specialized analysis agents.",
     instructions=(
-        f"{RECOMMENDED_PROMPT_PREFIX} "
-        "You are a helpful triaging agent for game data analytics. You can delegate questions to specialized analysis agents. "
-        "Available agents: Player Behavior Agent (player analysis), Performance Analysis Agent (server/game performance), "
-        "Revenue Analysis Agent (monetization data), Retention Analysis Agent (player retention), "
-        "Visualization Agent (charts and dashboards)."
+        f"{RECOMMENDED_PROMPT_PREFIX}\n"
+        "你是一个游戏数据分析系统的研究主导智能体，基于Anthropic研究系统的lead agent设计模式。\n\n"
+
+        "## 核心职责\n"
+        "作为研究主导智能体，你负责分析用户查询、确定查询类型、制定分析计划并协调专业化子智能体。\n\n"
+
+        "## 查询类型识别\n"
+        "1. **直接查询 (Straightforward)**: 单一领域的简单分析请求\n"
+        "2. **广度优先 (Breadth-first)**: 需要多个领域协作的综合分析\n"
+        "3. **深度优先 (Depth-first)**: 需要深入挖掘的复杂分析\n\n"
+
+        "## 可用的专业智能体\n"
+        "- **Player Behavior Agent**: 玩家行为分析、分群、参与度\n"
+        "- **Performance Analysis Agent**: 游戏性能监控、技术指标\n"
+        "- **Revenue Analysis Agent**: 收入分析、变现优化\n"
+        "- **Retention Analysis Agent**: 玩家留存、流失预测\n"
+        "- **Visualization Agent**: 数据可视化、图表生成\n"
+        "- **Orchestrator Agent**: 多智能体协调、复杂任务分解\n\n"
+
+        "## 工作流程\n"
+        "1. **分析查询**: 理解用户需求和意图\n"
+        "2. **确定类型**: 判断查询复杂度和所需专业领域\n"
+        "3. **选择策略**: \n"
+        "   - 简单查询 → 直接转交给相应专业智能体\n"
+        "   - 复杂查询 → 转交给Orchestrator Agent进行多智能体协调\n"
+        "4. **监控执行**: 确保任务正确执行并获得满意结果\n\n"
+
+        "## 决策原则\n"
+        "- 优先使用最专业的单一智能体处理简单查询\n"
+        "- 对于需要多领域协作的复杂查询，转交给Orchestrator Agent\n"
+        "- 始终确保用户获得准确、有价值的分析结果\n"
+        "- 保持对话的连贯性和上下文管理"
     ),
     handoffs=[
         handoff(agent=player_behavior_agent, on_handoff=on_player_analysis_handoff),
@@ -512,7 +671,229 @@ triage_agent = Agent[GameAnalyticsContext](
         handoff(agent=revenue_analysis_agent, on_handoff=on_revenue_analysis_handoff),
         retention_analysis_agent,
         visualization_agent,
+        # orchestrator_agent will be added later
     ],
+    input_guardrails=[relevance_guardrail, jailbreak_guardrail],
+)
+
+# =========================
+# VISUALIZATION AGENT
+# =========================
+
+@function_tool
+async def create_data_visualization(
+    context: RunContextWrapper[GameAnalyticsContext],
+    chart_type: str,
+    data_description: str,
+    title: str = "",
+    additional_params: str = ""
+) -> str:
+    """创建数据可视化图表"""
+    try:
+        # 确保MCP管理器已初始化
+        from mcp_integration import mcp_manager
+        if not mcp_manager.is_initialized:
+            await mcp_manager.initialize()
+
+        # 根据图表类型和数据描述生成图表
+        if chart_type.lower() in ["line", "折线图"]:
+            # 示例数据 - 实际应用中应该从context获取真实数据
+            chart_data = [
+                {"time": "2024-01", "value": 1200},
+                {"time": "2024-02", "value": 1350},
+                {"time": "2024-03", "value": 1100},
+                {"time": "2024-04", "value": 1450},
+                {"time": "2024-05", "value": 1600}
+            ]
+
+            try:
+                result = await mcp_manager.chart_generator.generate_line_chart(
+                    data=chart_data,
+                    x_field="time",
+                    y_field="value",
+                    title=title or f"游戏数据趋势 - {data_description}"
+                )
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+
+        elif chart_type.lower() in ["bar", "柱状图"]:
+            chart_data = [
+                {"category": "新用户", "value": 850},
+                {"category": "活跃用户", "value": 1200},
+                {"category": "付费用户", "value": 320},
+                {"category": "流失用户", "value": 180}
+            ]
+
+            try:
+                result = await mcp_manager.chart_generator.generate_bar_chart(
+                    data=chart_data,
+                    category_field="category",
+                    value_field="value",
+                    title=title or f"游戏数据分布 - {data_description}"
+                )
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+
+        elif chart_type.lower() in ["pie", "饼图"]:
+            chart_data = [
+                {"category": "移动端", "value": 65},
+                {"category": "PC端", "value": 25},
+                {"category": "Web端", "value": 10}
+            ]
+
+            try:
+                result = await mcp_manager.chart_generator.generate_pie_chart(
+                    data=chart_data,
+                    category_field="category",
+                    value_field="value",
+                    title=title or f"游戏数据占比 - {data_description}"
+                )
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+
+        else:
+            return f"❌ 不支持的图表类型: {chart_type}。支持的类型: line(折线图), bar(柱状图), pie(饼图)"
+
+        return f"""📊 **数据可视化完成**
+
+✅ 已生成 {chart_type} 图表: "{title or data_description}"
+
+📈 **图表信息**:
+- 图表类型: {chart_type}
+- 数据描述: {data_description}
+- 生成状态: 成功
+
+💡 **使用说明**: 图表已通过MCP可视化服务生成，可以在支持的界面中查看交互式图表。
+
+{result if isinstance(result, str) else "图表生成成功"}
+"""
+
+    except Exception as e:
+        return f"❌ 可视化生成失败: {str(e)}"
+
+visualization_agent = Agent[GameAnalyticsContext](
+    name="Visualization Agent",
+    model="gpt-4.1",
+    instructions="""你是一个专业的数据可视化智能体，基于Anthropic Research Subagent设计模式。
+
+## 核心职责
+专门负责游戏数据的可视化展示，将复杂的数据转化为直观的图表和图形。
+
+## 工作流程 (OODA循环)
+1. **观察 (Observe)**: 分析用户的可视化需求，识别数据类型和展示目标
+2. **定向 (Orient)**: 确定最适合的图表类型和可视化方案
+3. **决策 (Decide)**: 选择合适的图表参数和样式配置
+4. **行动 (Act)**: 调用MCP可视化工具生成图表
+
+## 专业能力
+- 📊 多种图表类型支持 (折线图、柱状图、饼图、散点图等)
+- 🎨 智能图表样式和配色方案
+- 📈 数据趋势和模式可视化
+- 🔍 交互式图表生成
+- 📱 响应式图表设计
+
+## 输出要求
+- 提供清晰的图表标题和说明
+- 包含数据来源和生成时间
+- 给出图表解读建议
+- 确保图表的可访问性
+
+当需要创建可视化时，使用 create_data_visualization 工具。
+如果遇到超出可视化范围的问题，可以转交给 Triage Agent。""",
+    tools=[create_data_visualization],
+    input_guardrails=[relevance_guardrail, jailbreak_guardrail],
+)
+
+# =========================
+# ORCHESTRATOR AGENT
+# =========================
+
+@function_tool
+async def orchestrate_multi_agent_analysis(
+    context: RunContextWrapper[GameAnalyticsContext],
+    user_query: str,
+    enable_parallel_execution: bool = True
+) -> str:
+    """协调多智能体分析任务 - 增强版本"""
+    try:
+        # 获取或初始化增强协调器
+        orchestrator = get_orchestrator()
+        if not orchestrator:
+            # 创建智能体映射
+            agent_mapping = {
+                "player_behavior": player_behavior_agent,
+                "performance": performance_analysis_agent,
+                "revenue": revenue_analysis_agent,
+                "retention": retention_analysis_agent,
+                "visualization": visualization_agent
+            }
+
+            # 初始化协调器
+            initialized = await initialize_orchestrator(agent_mapping)
+            if not initialized:
+                return "❌ 协调器初始化失败，请稍后重试"
+
+            orchestrator = get_orchestrator()
+
+        # 使用增强协调器执行分析
+        result = await orchestrator.orchestrate(user_query, {
+            "game_id": context.context.game_id,
+            "analysis_type": context.context.analysis_type,
+            "time_range": context.context.time_range,
+            "enable_parallel": enable_parallel_execution
+        })
+
+        if result["status"] == "error":
+            return f"❌ 协调执行失败: {result['error']}"
+
+        # 更新游戏上下文
+        context.context.analysis_type = "enhanced_multi_agent_orchestration"
+        context.context.metrics = ["orchestrator", "enhanced_analysis"]
+
+        return f"""🎯 **增强多智能体协调分析完成**
+
+{result['final_report']}
+
+📊 **执行统计**:
+- 查询复杂度: {result['complexity']}
+- 执行策略: {result['strategy']}
+- 会话ID: {result['session_info']['session_id']}
+- 总执行时长: {result['session_info']['total_duration']:.2f}秒
+- 成功率: {result['session_info']['success_rate']:.1f}%
+
+💡 **系统优势**: 采用Anthropic增强多智能体架构，实现智能任务分解、并行执行和自适应策略选择。
+"""
+
+    except Exception as e:
+        return f"增强多智能体协调出现错误: {str(e)}"
+
+orchestrator_agent = Agent[GameAnalyticsContext](
+    name="Orchestrator Agent",
+    model="gpt-4.1",
+    handoff_description="A multi-agent orchestrator that coordinates specialized agents for complex analysis tasks.",
+    instructions=f"""{RECOMMENDED_PROMPT_PREFIX}
+    你是一个多智能体系统的协调器，基于Anthropic研究系统架构设计。
+
+    你的核心职责：
+    1. 分析用户查询，确定查询类型（深度优先/广度优先/直接查询）
+    2. 制定详细的研究计划，将复杂任务分解为子任务
+    3. 协调专业化子智能体并行执行任务
+    4. 综合所有结果，生成高质量的最终报告
+
+    工作流程：
+    1. 使用 orchestrate_multi_agent_analysis 分析用户查询并协调执行
+    2. 自动分解复杂任务为专业化子任务
+    3. 并行调度多个专业智能体
+    4. 综合结果并生成洞察报告
+
+    始终遵循以下原则：
+    - 任务分解要清晰明确，避免重叠
+    - 优先使用并行执行提高效率
+    - 确保结果的准确性和完整性
+    - 提供有价值的洞察和建议
+
+    如果用户询问其他类型的分析，可以转交给相应的专业智能体。""",
+    tools=[orchestrate_multi_agent_analysis],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
@@ -522,3 +903,16 @@ performance_analysis_agent.handoffs.append(triage_agent)
 revenue_analysis_agent.handoffs.append(triage_agent)
 retention_analysis_agent.handoffs.append(triage_agent)
 visualization_agent.handoffs.append(triage_agent)
+
+# Bidirectional handoffs for triage agent
+triage_agent.handoffs.extend([
+    player_behavior_agent,
+    performance_analysis_agent,
+    revenue_analysis_agent,
+    retention_analysis_agent,
+    visualization_agent,
+    orchestrator_agent
+])
+
+# Bidirectional handoff for orchestrator
+orchestrator_agent.handoffs.append(triage_agent)

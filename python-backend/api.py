@@ -13,6 +13,7 @@ from main import (
     revenue_analysis_agent,
     retention_analysis_agent,
     visualization_agent,
+    orchestrator_agent,
     create_initial_context,
 )
 
@@ -115,6 +116,7 @@ def _get_agent_by_name(name: str):
         revenue_analysis_agent.name: revenue_analysis_agent,
         retention_analysis_agent.name: retention_analysis_agent,
         visualization_agent.name: visualization_agent,
+        orchestrator_agent.name: orchestrator_agent,
     }
     return agents.get(name, triage_agent)
 
@@ -148,6 +150,7 @@ def _build_agents_list() -> List[Dict[str, Any]]:
         make_agent_dict(revenue_analysis_agent),
         make_agent_dict(retention_analysis_agent),
         make_agent_dict(visualization_agent),
+        make_agent_dict(orchestrator_agent),
     ]
 
 # =========================

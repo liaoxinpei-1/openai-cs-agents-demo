@@ -1,0 +1,61 @@
+{
+  "mcpServers": {
+    "taskmanager": {
+      "command": "node",
+      "args": ["/Users/liaoxinpei/Documents/Cline/MCP/mcp-taskmanager/dist/index.js"],
+      "description": "Task management and decomposition server for multi-agent coordination",
+      "capabilities": [
+        "task_creation",
+        "task_decomposition", 
+        "task_execution",
+        "task_status_tracking",
+        "subtask_management"
+      ]
+    },
+    "chart": {
+      "command": "npx",
+      "args": ["-y", "@antv/mcp-server-chart"],
+      "description": "Data visualization and chart generation server",
+      "capabilities": [
+        "chart_generation",
+        "data_visualization",
+        "interactive_dashboards",
+        "export_formats"
+      ]
+    }
+  },
+  "integration": {
+    "mode": "multi-agent-orchestration",
+    "lead_agent": "orchestrator",
+    "subagents": [
+      "player_behavior",
+      "performance_analysis", 
+      "revenue_analysis",
+      "retention_analysis",
+      "visualization"
+    ],
+    "task_flow": {
+      "1": "User input received by orchestrator",
+      "2": "Orchestrator analyzes and decomposes task using taskmanager MCP",
+      "3": "Subtasks assigned to specialized subagents",
+      "4": "Subagents execute in parallel using available tools",
+      "5": "Results aggregated by orchestrator",
+      "6": "Visualization generated using chart MCP if needed",
+      "7": "Final response delivered to user"
+    }
+  },
+  "prompt_templates": {
+    "orchestrator": {
+      "role": "Lead research and coordination agent",
+      "instructions": "Analyze user queries, decompose into subtasks, coordinate subagents, and synthesize results",
+      "tools": ["taskmanager", "handoff_to_subagents"],
+      "thinking_mode": "extended"
+    },
+    "subagent": {
+      "role": "Specialized analysis agent", 
+      "instructions": "Execute specific analysis tasks using domain expertise and available tools",
+      "tools": ["domain_specific_analysis", "chart_generation"],
+      "thinking_mode": "interleaved"
+    }
+  }
+}
