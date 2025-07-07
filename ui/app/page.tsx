@@ -3,8 +3,14 @@
 import { useEffect, useState } from "react";
 import { AgentPanel } from "@/components/agent-panel";
 import { Chat } from "@/components/chat";
-import type { Agent, AgentEvent, GuardrailCheck, Message } from "@/lib/types";
+import type { Agent, AgentEvent, GuardrailCheck, Message, GameAnalyticsContext } from "@/lib/types";
 import { callChatAPI } from "@/lib/api";
+
+// 生成唯一ID的辅助函数
+const generateId = (() => {
+  let counter = 0;
+  return (prefix: string = "id") => `${prefix}-${Date.now()}-${++counter}`;
+})();
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -12,10 +18,17 @@ export default function Home() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [currentAgent, setCurrentAgent] = useState<string>("");
   const [guardrails, setGuardrails] = useState<GuardrailCheck[]>([]);
-  const [context, setContext] = useState<Record<string, any>>({});
+  const [context, setContext] = useState<GameAnalyticsContext>({});
   const [conversationId, setConversationId] = useState<string | null>(null);
   // Loading state while awaiting assistant response
   const [isLoading, setIsLoading] = useState(false);
+  // 防止水合错误的标志
+  const [isMounted, setIsMounted] = useState(false);
+
+  // 确保组件已挂载
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Boot the conversation
   useEffect(() => {
@@ -24,21 +37,22 @@ export default function Home() {
       setConversationId(data.conversation_id);
       setCurrentAgent(data.current_agent);
       setContext(data.context);
-      const initialEvents = (data.events || []).map((e: any) => ({
+      const now = Date.now();
+      const initialEvents = (data.events || []).map((e: any, index: number) => ({
         ...e,
-        timestamp: e.timestamp ?? Date.now(),
+        timestamp: e.timestamp ?? now + index,
       }));
       setEvents(initialEvents);
       setAgents(data.agents || []);
       setGuardrails(data.guardrails || []);
       if (Array.isArray(data.messages)) {
         setMessages(
-          data.messages.map((m: any) => ({
-            id: Date.now().toString() + Math.random().toString(),
+          data.messages.map((m: any, index: number) => ({
+            id: generateId("initial"),
             content: m.content,
             role: "assistant",
             agent: m.agent,
-            timestamp: new Date(),
+            timestamp: new Date(now + index),
           }))
         );
       }
@@ -47,11 +61,12 @@ export default function Home() {
 
   // Send a user message
   const handleSendMessage = async (content: string) => {
+    const now = Date.now();
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: generateId("user"),
       content,
       role: "user",
-      timestamp: new Date(),
+      timestamp: new Date(now),
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -63,9 +78,10 @@ export default function Home() {
     setCurrentAgent(data.current_agent);
     setContext(data.context);
     if (data.events) {
-      const stamped = data.events.map((e: any) => ({
+      const responseTime = Date.now();
+      const stamped = data.events.map((e: any, index: number) => ({
         ...e,
-        timestamp: e.timestamp ?? Date.now(),
+        timestamp: e.timestamp ?? responseTime + index,
       }));
       setEvents((prev) => [...prev, ...stamped]);
     }
@@ -74,18 +90,31 @@ export default function Home() {
     if (data.guardrails) setGuardrails(data.guardrails);
 
     if (data.messages) {
-      const responses: Message[] = data.messages.map((m: any) => ({
-        id: Date.now().toString() + Math.random().toString(),
+      const responseTime = Date.now();
+      const responses: Message[] = data.messages.map((m: any, index: number) => ({
+        id: generateId("response"),
         content: m.content,
         role: "assistant",
         agent: m.agent,
-        timestamp: new Date(),
+        timestamp: new Date(responseTime + index),
       }));
       setMessages((prev) => [...prev, ...responses]);
     }
 
     setIsLoading(false);
   };
+
+  // 防止水合错误，在客户端挂载前显示加载状态
+  if (!isMounted) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">正在加载游戏数据分析系统...</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="flex h-screen gap-2 bg-gray-100 p-2">

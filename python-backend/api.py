@@ -8,10 +8,11 @@ import logging
 
 from main import (
     triage_agent,
-    faq_agent,
-    seat_booking_agent,
-    flight_status_agent,
-    cancellation_agent,
+    player_behavior_agent,
+    performance_analysis_agent,
+    revenue_analysis_agent,
+    retention_analysis_agent,
+    visualization_agent,
     create_initial_context,
 )
 
@@ -109,10 +110,11 @@ def _get_agent_by_name(name: str):
     """Return the agent object by name."""
     agents = {
         triage_agent.name: triage_agent,
-        faq_agent.name: faq_agent,
-        seat_booking_agent.name: seat_booking_agent,
-        flight_status_agent.name: flight_status_agent,
-        cancellation_agent.name: cancellation_agent,
+        player_behavior_agent.name: player_behavior_agent,
+        performance_analysis_agent.name: performance_analysis_agent,
+        revenue_analysis_agent.name: revenue_analysis_agent,
+        retention_analysis_agent.name: retention_analysis_agent,
+        visualization_agent.name: visualization_agent,
     }
     return agents.get(name, triage_agent)
 
@@ -141,10 +143,11 @@ def _build_agents_list() -> List[Dict[str, Any]]:
         }
     return [
         make_agent_dict(triage_agent),
-        make_agent_dict(faq_agent),
-        make_agent_dict(seat_booking_agent),
-        make_agent_dict(flight_status_agent),
-        make_agent_dict(cancellation_agent),
+        make_agent_dict(player_behavior_agent),
+        make_agent_dict(performance_analysis_agent),
+        make_agent_dict(revenue_analysis_agent),
+        make_agent_dict(retention_analysis_agent),
+        make_agent_dict(visualization_agent),
     ]
 
 # =========================
@@ -205,7 +208,7 @@ async def chat_endpoint(req: ChatRequest):
                 passed=(g != failed),
                 timestamp=gr_timestamp,
             ))
-        refusal = "Sorry, I can only answer questions related to airline travel."
+        refusal = "抱歉，我只能回答与游戏数据分析相关的问题。请询问关于玩家行为、游戏性能、收入分析、留存分析或数据可视化的问题。"
         state["input_items"].append({"role": "assistant", "content": refusal})
         return ChatResponse(
             conversation_id=conversation_id,

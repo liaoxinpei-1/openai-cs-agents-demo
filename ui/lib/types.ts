@@ -15,6 +15,21 @@ export interface Agent {
   input_guardrails: string[]
 }
 
+// Game Analytics Context Interface
+export interface GameAnalyticsContext {
+  game_id?: string
+  player_id?: string
+  time_range?: {
+    start?: string
+    end?: string
+    period?: string
+  }
+  analysis_type?: string
+  metrics?: string[]
+  filters?: Record<string, any>
+  session_id?: string
+}
+
 export type EventType = "message" | "handoff" | "tool_call" | "tool_output" | "context_update"
 
 export interface AgentEvent {
